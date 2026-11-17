@@ -60,3 +60,37 @@ test("GET /trips/:id returns 200", async () => {
 		await db.query("DELETE FROM trips WHERE id = $1", [tripId]);
 	}
 });
+
+test("POST /trips returns 201 for valid data", async () => {
+	const response = await app.inject({
+		method: "POST",
+		url: "/trips",
+		payload: {
+			title: "Italy 2027",
+		},
+	});
+
+	const createdTrip = response.json();
+
+	try {
+		assert.equal(response.statusCode, 201);
+		assert.equal(createdTrip.title, "Italy 2027");
+		assert.equal(typeof createdTrip.id, "string");
+	} finally {
+		if (createdTrip.id) {
+			await db.query("DELETE FROM trips WHERE id = $1", [createdTrip.id]);
+		}
+	}
+});
+
+test("POST /trips returns 400 for empty title", async () => {
+	const response = await app.inject({
+		method: "POST",
+		url: "/trips",
+		payload: {
+			title: "",
+		},
+	});
+
+	assert.equal(response.statusCode, 400);
+});

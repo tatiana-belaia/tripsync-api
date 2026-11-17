@@ -68,5 +68,35 @@ export function buildApp(db: Pool) {
 		},
 	);
 
+	app.post(
+		"/trips",
+		{
+			schema: {
+				body: {
+					type: "object",
+					required: ["title"],
+					properties: {
+						title: {
+							type: "string",
+							minLength: 1,
+							maxLength: 120,
+							pattern: "\\S",
+						},
+					},
+				},
+			},
+		},
+		async (request, reply) => {
+			const title = request.body.title.trim();
+
+			const result = await db.query<Trip>(
+				"INSERT INTO trips (title) VALUES ($1) RETURNING id, title",
+				[title],
+			);
+
+			return reply.code(201).send(result.rows[0]);
+		},
+	);
+
 	return app;
 }
