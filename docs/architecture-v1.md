@@ -65,6 +65,16 @@ flowchart LR
 - **Reorder transaction:** Protects data consistency but may require coordination for concurrent owner edits; version checks or conflict handling can be added if needed.
 - **Testing:** First measure where latency occurs, then load-test representative read/write mixes in a safe environment (including peak bursts), rather than treating 1,000 concurrent requests as a proven requirement.
 
-## Next validation steps
+## Tradeoff review and failure scenarios (November 17 exercise)
 
-Confirm actual schema and canonical IDs; implement authorization, CRUD and reorder; run an end-to-end test for missing itinerary (`404`), shared viewer write rejection (`403`), rollback on partial reorder failure, and post-save cache refresh. Review p95 performance and availability targets after measuring a working system.
+### Two tradeoffs ###
+1. **Nested-by-day response vs. flat activity array (daily itinerary UI).** Nested JSON matches the day-by-day React view, so the frontend does less grouping. The cost is deeper object traversal and more complex immutable updates; a flat array is simpler for generic activity manipulation but requires grouping by date for the daily view. Decision: Keep the nested-by-day GET response for v1.
+2. **Nested vs. flat response (trip-wide search).** With a flat array already loaded in the browser, filtering all activities is straightforward. With nested JSON, the client must traverse each day or flatten the activities first. Tradeoff nuance: This concerns client-side searching over a fetched response; backend search can query flat relational activity rows directly, regardless of how the GET response is shaped. Decision: Keep nested GET for the current day-based UI and introduce a dedicated search endpoint only if product needs warrant it.
+**Ordering justification:** Give each activity a stable id and an explicit position scoped to its day. Array indexes describe the current array layout, but are not persistent database ordering keys: a deletion, insertion, or new response can shift indexes. Sort by position when reading; validate a complete reorder payload and save all affected positions atomically. If v1 requires consecutive positions, renumber after deletion within a transaction.
+
+**Two API failure scenarios
+1. **Missing itinerary:** GET /api/itineraries/:itineraryId for a well-formed nonexistent ID returns 404 Not Found with { "code": "ITINERARY_NOT_FOUND", "message": "Itinerary not found" }. Use a resource-specific error code so the UI can distinguish missing itineraries from other errors.
+2. **Database failure halfway through reorder:** PATCH /api/itineraries/:itineraryId/activities/order applies the changes in a database transaction. If an update fails unexpectedly, ROLLBACK all affected position changes and return 500 Internal Server Error, for example { "code": "REORDER_FAILED", "message": "Could not save activity order" }. The frontend should show an error and revert or refetch any optimistic ordering. Do not leave a partially saved order.
+
+## Next validation steps ##
+Confirm actual schema and canonical IDs; implement authorization, CRUD and reorder; run an end-to-end test for missing itinerary (404), shared viewer write rejection (403), rollback on partial reorder failure, and post-save cache refresh. Review p95 performance and availability targets after measuring a working system.
