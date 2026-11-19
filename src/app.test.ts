@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { buildApp } from "./app";
 import { db } from "./db";
+import { Pool } from "pg";
 
 const app = buildApp(db);
 
@@ -10,6 +11,40 @@ const app = buildApp(db);
 after(async () => {
 	await app.close();
 	await db.end();
+});
+
+test("GET /trips returns trips from the database", async () => {
+	const expectedTrips = [
+		{
+			id: "4dea395d-6748-4a53-926d-bb87564ac5e5",
+			title: "Japan 2027",
+		},
+	];
+
+	let queryCalled = false;
+
+	const db = {
+		query: async () => {
+			queryCalled = true;
+
+			return { rows: expectedTrips };
+		},
+	} as unknown as Pool;
+
+	const app = buildApp(db);
+
+	try {
+		const response = await app.inject({
+			method: "GET",
+			url: "/trips",
+		});
+
+		assert.equal(response.statusCode, 200);
+		assert.deepEqual(response.json(), expectedTrips);
+		assert.equal(queryCalled, true);
+	} finally {
+		await app.close();
+	}
 });
 
 test("GET /trips/:id returns 400 for invalid UUID", async () => {
