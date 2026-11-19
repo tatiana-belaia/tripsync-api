@@ -15,10 +15,11 @@ export function buildApp(db: Pool) {
 	});
 
 	app.get("/trips", async () => {
-		return [
-			{ id: "1", title: "Japan 2027" },
-			{ id: "2", title: "Italy 2026" },
-		];
+		const result = await db.query<Trip>(
+			"SELECT id, title FROM trips ORDER BY title",
+		);
+
+		return result.rows;
 	});
 
 	app.get(
