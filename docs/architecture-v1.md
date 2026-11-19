@@ -76,5 +76,86 @@ flowchart LR
 1. **Missing itinerary:** GET /api/itineraries/:itineraryId for a well-formed nonexistent ID returns 404 Not Found with { "code": "ITINERARY_NOT_FOUND", "message": "Itinerary not found" }. Use a resource-specific error code so the UI can distinguish missing itineraries from other errors.
 2. **Database failure halfway through reorder:** PATCH /api/itineraries/:itineraryId/activities/order applies the changes in a database transaction. If an update fails unexpectedly, ROLLBACK all affected position changes and return 500 Internal Server Error, for example { "code": "REORDER_FAILED", "message": "Could not save activity order" }. The frontend should show an error and revert or refetch any optimistic ordering. Do not leave a partially saved order.
 
-## Next validation steps ##
-Confirm actual schema and canonical IDs; implement authorization, CRUD and reorder; run an end-to-end test for missing itinerary (404), shared viewer write rejection (403), rollback on partial reorder failure, and post-save cache refresh. Review p95 performance and availability targets after measuring a working system.
+## Request Flow and Scalability
+
+### Assumptions
+
+- Initial load: 10,000 daily active users (DAU).
+- Growth scenario: 100,000 DAU.
+- Each active user generates approximately 5 reads and 10 writes per day.
+- At 100,000 DAU, estimated average traffic is about 5.8 read RPS and 11.6 write RPS.
+- Actual peak traffic may be substantially higher.
+
+### Request/Data Flow
+
+```mermaid
+flowchart TD
+    A[Browser / Next.js] --> B{TanStack Query cache}
+    B -->|Fresh data| A
+    B -->|Fetch needed| C[Fastify API]
+    C --> D[Authorization check]
+    D -->|Allowed| E[(PostgreSQL)]
+    D -->|Denied| F[403 / 404 response]
+    E -->|Itinerary records| C
+    C -->|Nested-by-day JSON| B
+```
+
+For reads, the frontend checks its cache first. If data
+must be fetched, Fastify authorizes the request and
+retrieves the itinerary from PostgreSQL.
+
+After a successful write, the frontend invalidates
+the relevant itinerary query to refresh cached data.
+
+### Potential Bottlenecks
+
+**1. Fastify API server**
+
+Problem: Increased concurrent traffic can overload a
+single API instance, increasing response latency.
+
+Investigation:
+- Monitor API response time, CPU and memory usage.
+- Test concurrent requests with a load-testing tool.
+- Determine whether API processing or database
+  waiting time is responsible for latency.
+
+**2. PostgreSQL database**
+
+Problem: Slow queries, missing indexes or connection
+contention can increase response times as traffic grows.
+
+Investigation:
+- Measure database query execution times.
+- Examine query plans and relevant indexes.
+- Monitor database connections and resource usage.
+
+### Architectural Tradeoffs
+
+**Tradeoff 1: Query optimization vs. read replicas**
+
+Decision: Investigate slow queries and optimize indexes
+before introducing database read replicas.
+
+Advantages:
+- Lower initial infrastructure complexity and cost.
+- Potential improvements without adding another server.
+
+Disadvantages:
+- Indexes require storage and increase write overhead.
+- One database may eventually become a scaling limit.
+
+**Tradeoff 2: Longer caching vs. frequent refetching**
+
+Decision: Use TanStack Query caching and invalidate
+relevant queries after successful edits.
+
+Advantages:
+- Faster repeat views.
+- Fewer unnecessary API and database requests.
+
+Disadvantages:
+- Users may temporarily see stale data.
+- Invalidation and refetch behavior require careful
+  design, especially for shared itineraries.
+```
