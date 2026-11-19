@@ -94,3 +94,57 @@ test("POST /trips returns 400 for empty title", async () => {
 
 	assert.equal(response.statusCode, 400);
 });
+
+test("PATCH /trips/:id returns 200 for valid update", async () => {
+	const result = await db.query<{ id: string }>(
+		"INSERT INTO trips (title) VALUES ($1) RETURNING id",
+		["Japan 2027"],
+	);
+
+	const tripId = result.rows[0].id;
+
+	try {
+		const response = await app.inject({
+			method: "PATCH",
+			url: `/trips/${tripId}`,
+			payload: {
+				title: "Japan 2028",
+			},
+		});
+
+		const updatedTrip = response.json();
+
+		assert.equal(response.statusCode, 200);
+		assert.equal(updatedTrip.title, "Japan 2028");
+		assert.equal(updatedTrip.id, tripId);
+	} finally {
+		await db.query("DELETE FROM trips WHERE id = $1", [tripId]);
+	}
+});
+
+test("PATCH /trips/:id returns 404 for missing trip", async () => {
+	const response = await app.inject({
+		method: "PATCH",
+		url: "/trips/550e8400-e29b-41d4-a716-446655440000",
+		payload: {
+			title: "Japan 2028",
+		},
+	});
+
+	assert.equal(response.statusCode, 404);
+	assert.deepEqual(response.json(), {
+		message: "Trip not found",
+	});
+});
+
+test("PATCH /trips/:id returns 400 for empty title", async () => {
+	const response = await app.inject({
+		method: "PATCH",
+		url: "/trips/550e8400-e29b-41d4-a716-446655440000",
+		payload: {
+			title: "",
+		},
+	});
+
+	assert.equal(response.statusCode, 400);
+});

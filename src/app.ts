@@ -98,5 +98,49 @@ export function buildApp(db: Pool) {
 		},
 	);
 
+	app.patch(
+		"/trips/:id",
+		{
+			schema: {
+				params: {
+					type: "object",
+					required: ["id"],
+					properties: {
+						id: { type: "string", format: "uuid" },
+					},
+				},
+				body: {
+					type: "object",
+					required: ["title"],
+					properties: {
+						title: {
+							type: "string",
+							minLength: 1,
+							maxLength: 120,
+							pattern: "\\S",
+						},
+					},
+				},
+			},
+		},
+		async (request, reply) => {
+			const id = request.params.id;
+			const title = request.body.title.trim();
+
+			const result = await db.query<Trip>(
+				"UPDATE trips SET title = $1 WHERE id = $2 RETURNING id, title",
+				[title, id],
+			);
+
+			if (result.rows.length === 0) {
+				return reply.code(404).send({
+					message: "Trip not found",
+				});
+			}
+
+			return reply.code(200).send(result.rows[0]);
+		},
+	);
+
 	return app;
 }
