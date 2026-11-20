@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { buildApp } from "./app";
 import { db } from "./db";
 import { Pool } from "pg";
+import { ItinerarySuggestionSchema } from "./ai/itinerary-suggestion.schema";
 
 const app = buildApp(db);
 
@@ -182,4 +183,54 @@ test("PATCH /trips/:id returns 400 for empty title", async () => {
 	});
 
 	assert.equal(response.statusCode, 400);
+});
+
+test("POST /ai/itinerary-suggestions returns 200 for valid data", async () => {
+	const response = await app.inject({
+		method: "POST",
+		url: "/ai/itinerary-suggestions",
+		payload: {
+			destination: "Rome",
+		},
+	});
+
+	const responseBody = response.json();
+
+	assert.equal(response.statusCode, 200);
+	assert.equal(responseBody.source, "mock");
+
+	const validation = ItinerarySuggestionSchema.safeParse(
+		responseBody.suggestion,
+	);
+	assert.equal(validation.success, true);
+});
+
+test("POST /ai/itinerary-suggestions returns 400 for unsupported destination", async () => {
+	const response = await app.inject({
+		method: "POST",
+		url: "/ai/itinerary-suggestions",
+		payload: {
+			destination: "Berlin",
+		},
+	});
+
+	const responseBody = response.json();
+
+	assert.equal(response.statusCode, 400);
+	assert.equal(responseBody.message, "Destination is not supported");
+});
+
+test("POST /ai/itinerary-suggestions returns 400 for empty destination", async () => {
+	const response = await app.inject({
+		method: "POST",
+		url: "/ai/itinerary-suggestions",
+		payload: {
+			destination: "",
+		},
+	});
+
+	const responseBody = response.json();
+
+	assert.equal(response.statusCode, 400);
+	assert.equal(responseBody.error, "Bad Request");
 });

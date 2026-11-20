@@ -1,6 +1,10 @@
 import Fastify from "fastify";
 import type { Pool } from "pg";
 import { JsonSchemaToTsProvider } from "@fastify/type-provider-json-schema-to-ts";
+import {
+	getMockItinerarySuggestion,
+	UnsupportedDestinationError,
+} from "./ai/mock-itinerary-suggestion";
 
 type Trip = {
 	id: string;
@@ -140,6 +144,41 @@ export function buildApp(db: Pool) {
 			}
 
 			return reply.code(200).send(result.rows[0]);
+		},
+	);
+
+	app.post(
+		"/ai/itinerary-suggestions",
+		{
+			schema: {
+				body: {
+					type: "object",
+					required: ["destination"],
+					properties: {
+						destination: {
+							type: "string",
+							minLength: 1,
+							pattern: "\\S",
+						},
+					},
+					additionalProperties: false,
+				},
+			},
+		},
+		async (request, reply) => {
+			const destination = request.body.destination.trim();
+
+			try {
+				const result = getMockItinerarySuggestion(destination);
+
+				return reply.code(200).send(result);
+			} catch (error) {
+				if (error instanceof UnsupportedDestinationError) {
+					return reply.code(400).send({ message: error.message });
+				}
+
+				throw error;
+			}
 		},
 	);
 
