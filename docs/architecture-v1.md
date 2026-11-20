@@ -30,12 +30,12 @@
 
 ## API sketch
 
-| Action | Proposed endpoint | Body / response |
-|---|---|---|
-| Read itinerary | `GET /api/itineraries/:itineraryId` | `200` with trip name and `days: [{ date, activities: [{ id, title, position, time?, location?, notes? }] }]` |
-| Create activity | `POST /api/activities` | `{ trip_id, title, date, time?, location?, notes? }`; server may assign next `position` |
-| Edit activity | `PATCH /api/activities/:activityId` | Only changed fields, e.g. `{ "title": "Tokyo Tower at sunset" }` |
-| Delete activity | `DELETE /api/activities/:activityId` | Delete the selected activity |
+| Action               | Proposed endpoint                                      | Body / response                                                                                                                |
+| -------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| Read itinerary       | `GET /api/itineraries/:itineraryId`                    | `200` with trip name and `days: [{ date, activities: [{ id, title, position, time?, location?, notes? }] }]`                   |
+| Create activity      | `POST /api/activities`                                 | `{ trip_id, title, date, time?, location?, notes? }`; server may assign next `position`                                        |
+| Edit activity        | `PATCH /api/activities/:activityId`                    | Only changed fields, e.g. `{ "title": "Tokyo Tower at sunset" }`                                                               |
+| Delete activity      | `DELETE /api/activities/:activityId`                   | Delete the selected activity                                                                                                   |
 | Reorder within a day | `PATCH /api/itineraries/:itineraryId/activities/order` | `{ "date": "2027-10-10", "activities": [{ "id": 3, "position": 1 }, { "id": 1, "position": 2 }, { "id": 2, "position": 3 }] }` |
 
 **API-ID decision pending implementation:** Earlier API exercises use `:itineraryId`, but the existing PostgreSQL exercise links `itinerary_items.trip_id` to `trips.id`. With one itinerary per trip, prefer resolving the API to a **trip ID** (for example, `GET /api/trips/:tripId/itinerary`) before coding, and revise the previous API specification consistently. Do not assume an `itineraries` table exists.
@@ -67,12 +67,14 @@ flowchart LR
 
 ## Tradeoff review and failure scenarios (November 17 exercise)
 
-### Two tradeoffs ###
+### Two tradeoffs
+
 1. **Nested-by-day response vs. flat activity array (daily itinerary UI).** Nested JSON matches the day-by-day React view, so the frontend does less grouping. The cost is deeper object traversal and more complex immutable updates; a flat array is simpler for generic activity manipulation but requires grouping by date for the daily view. Decision: Keep the nested-by-day GET response for v1.
 2. **Nested vs. flat response (trip-wide search).** With a flat array already loaded in the browser, filtering all activities is straightforward. With nested JSON, the client must traverse each day or flatten the activities first. Tradeoff nuance: This concerns client-side searching over a fetched response; backend search can query flat relational activity rows directly, regardless of how the GET response is shaped. Decision: Keep nested GET for the current day-based UI and introduce a dedicated search endpoint only if product needs warrant it.
-**Ordering justification:** Give each activity a stable id and an explicit position scoped to its day. Array indexes describe the current array layout, but are not persistent database ordering keys: a deletion, insertion, or new response can shift indexes. Sort by position when reading; validate a complete reorder payload and save all affected positions atomically. If v1 requires consecutive positions, renumber after deletion within a transaction.
+   **Ordering justification:** Give each activity a stable id and an explicit position scoped to its day. Array indexes describe the current array layout, but are not persistent database ordering keys: a deletion, insertion, or new response can shift indexes. Sort by position when reading; validate a complete reorder payload and save all affected positions atomically. If v1 requires consecutive positions, renumber after deletion within a transaction.
 
-**Two API failure scenarios
+\*\*Two API failure scenarios
+
 1. **Missing itinerary:** GET /api/itineraries/:itineraryId for a well-formed nonexistent ID returns 404 Not Found with { "code": "ITINERARY_NOT_FOUND", "message": "Itinerary not found" }. Use a resource-specific error code so the UI can distinguish missing itineraries from other errors.
 2. **Database failure halfway through reorder:** PATCH /api/itineraries/:itineraryId/activities/order applies the changes in a database transaction. If an update fails unexpectedly, ROLLBACK all affected position changes and return 500 Internal Server Error, for example { "code": "REORDER_FAILED", "message": "Could not save activity order" }. The frontend should show an error and revert or refetch any optimistic ordering. Do not leave a partially saved order.
 
@@ -115,6 +117,7 @@ Problem: Increased concurrent traffic can overload a
 single API instance, increasing response latency.
 
 Investigation:
+
 - Monitor API response time, CPU and memory usage.
 - Test concurrent requests with a load-testing tool.
 - Determine whether API processing or database
@@ -126,6 +129,7 @@ Problem: Slow queries, missing indexes or connection
 contention can increase response times as traffic grows.
 
 Investigation:
+
 - Measure database query execution times.
 - Examine query plans and relevant indexes.
 - Monitor database connections and resource usage.
@@ -138,10 +142,12 @@ Decision: Investigate slow queries and optimize indexes
 before introducing database read replicas.
 
 Advantages:
+
 - Lower initial infrastructure complexity and cost.
 - Potential improvements without adding another server.
 
 Disadvantages:
+
 - Indexes require storage and increase write overhead.
 - One database may eventually become a scaling limit.
 
@@ -151,11 +157,36 @@ Decision: Use TanStack Query caching and invalidate
 relevant queries after successful edits.
 
 Advantages:
+
 - Faster repeat views.
 - Fewer unnecessary API and database requests.
 
 Disadvantages:
+
 - Users may temporarily see stale data.
 - Invalidation and refetch behavior require careful
   design, especially for shared itineraries.
+
+### Identified Weakness: Single API Server
+
+**Weakness:** A single Fastify instance may become overloaded
+as concurrent requests increase. It is also a single
+point of failure.
+
+**User impact:** Slower itinerary loading, longer loading
+indicators, and potentially failed requests.
+
+**Investigation:** Measure API latency, CPU, memory, and
+database query times. Perform controlled load testing.
+
+**Potential improvement:** Increase server resources
+(vertical scaling) or introduce multiple Fastify instances
+with a load balancer (horizontal scaling), if measurements
+justify it.
+
+**Current decision:** Keep the simple architecture for v1.
+Optimize and scale based on measured performance.
+
+```
+
 ```
