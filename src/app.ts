@@ -11,6 +11,30 @@ type Trip = {
 	title: string;
 };
 
+type TripActivityRow = {
+	trip_id: string;
+	trip_title: string;
+	activity_id: string | null;
+	activity_title: string | null;
+	day_number: number | null;
+	position: number | null;
+};
+
+type Activity = {
+	id: string;
+	title: string;
+	position: number;
+};
+
+type ItineraryDay = {
+	dayNumber: number;
+	activities: Activity[];
+};
+
+type TripDetail = Trip & {
+	days: ItineraryDay[];
+};
+
 export function buildApp(db: Pool) {
 	const app = Fastify().withTypeProvider<JsonSchemaToTsProvider>();
 
@@ -40,10 +64,32 @@ export function buildApp(db: Pool) {
 				response: {
 					200: {
 						type: "object",
-						required: ["id", "title"],
+						required: ["id", "title", "days"],
 						properties: {
 							id: { type: "string" },
 							title: { type: "string" },
+							days: {
+								type: "array",
+								items: {
+									type: "object",
+									required: ["dayNumber", "activities"],
+									properties: {
+										dayNumber: { type: "integer" },
+										activities: {
+											type: "array",
+											items: {
+												type: "object",
+												required: ["id", "title", "position"],
+												properties: {
+													id: { type: "string" },
+													title: { type: "string" },
+													position: { type: "integer" },
+												},
+											},
+										},
+									},
+								},
+							},
 						},
 					},
 					404: {
@@ -59,8 +105,19 @@ export function buildApp(db: Pool) {
 		async (request, reply) => {
 			const id = request.params.id;
 
-			const result = await db.query<Trip>(
-				"SELECT id, title FROM trips WHERE id = $1",
+			const result = await db.query<TripActivityRow>(
+				`SELECT
+    				t.id AS trip_id,
+    				t.title AS trip_title,
+    				i.id AS activity_id,
+    				i.title AS activity_title,
+    				i.day_number,
+    				i.position
+  				FROM trips AS t
+  				LEFT JOIN itinerary_items AS i
+    				ON t.id = i.trip_id
+  				WHERE t.id = $1
+  				ORDER BY i.day_number, i.position, i.id`,
 				[id],
 			);
 
@@ -69,7 +126,46 @@ export function buildApp(db: Pool) {
 					message: "Trip not found",
 				});
 			}
-			return result.rows[0];
+			const firstRow = result.rows[0];
+
+			const trip: TripDetail = {
+				id: firstRow.trip_id,
+				title: firstRow.trip_title,
+				days: [],
+			};
+
+			for (const row of result.rows) {
+				if (
+					row.activity_id === null ||
+					row.activity_title === null ||
+					row.day_number === null ||
+					row.position === null
+				) {
+					continue;
+				}
+				const dayNumber = row.day_number;
+
+				let day = trip.days.find((day) => day.dayNumber === dayNumber);
+
+				if (!day) {
+					day = {
+						dayNumber,
+						activities: [],
+					};
+
+					trip.days.push(day);
+				}
+
+				const activity: Activity = {
+					id: row.activity_id,
+					title: row.activity_title,
+					position: row.position,
+				};
+
+				day.activities.push(activity);
+			}
+
+			return trip;
 		},
 	);
 

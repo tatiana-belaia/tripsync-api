@@ -91,6 +91,7 @@ test("GET /trips/:id returns 200", async () => {
 		assert.deepEqual(response.json(), {
 			id: tripId,
 			title: "My test trip",
+			days: [],
 		});
 	} finally {
 		await db.query("DELETE FROM trips WHERE id = $1", [tripId]);
@@ -233,4 +234,63 @@ test("POST /ai/itinerary-suggestions returns 400 for empty destination", async (
 
 	assert.equal(response.statusCode, 400);
 	assert.equal(responseBody.error, "Bad Request");
+});
+
+test("GET /trips/:id groups activities by day and position", async () => {
+	const result = await db.query<{ id: string }>(
+		"INSERT INTO trips (title) VALUES ($1) RETURNING id",
+		["Japan 2027"],
+	);
+
+	const tripId = result.rows[0].id;
+
+	try {
+		await db.query(
+			"INSERT INTO itinerary_items (trip_id, title, position, day_number) VALUES($1, $2, $3, $4), ($5, $6, $7, $8), ($9, $10, $11, $12)",
+			[
+				tripId,
+				"Visit Kyoto",
+				0,
+				2,
+				tripId,
+				"Visit Tokyo",
+				1,
+				1,
+				tripId,
+				"Visit Shibuya",
+				0,
+				1,
+			],
+		);
+
+		const response = await app.inject({
+			method: "GET",
+			url: `/trips/${tripId}`,
+		});
+
+		const trip = response.json();
+		assert.equal(response.statusCode, 200);
+		assert.equal(trip.days.length, 2);
+
+		assert.deepEqual(
+			trip.days.map((day: { dayNumber: number }) => day.dayNumber),
+			[1, 2],
+		);
+		assert.deepEqual(
+			trip.days[0].activities.map(
+				(activity: { title: string }) => activity.title,
+			),
+			["Visit Shibuya", "Visit Tokyo"],
+		);
+		assert.deepEqual(
+			trip.days[1].activities.map(
+				(activity: { title: string }) => activity.title,
+			),
+			["Visit Kyoto"],
+		);
+	} finally {
+		await db.query("DELETE FROM itinerary_items WHERE trip_id = $1", [tripId]);
+
+		await db.query("DELETE FROM trips WHERE id = $1", [tripId]);
+	}
 });
