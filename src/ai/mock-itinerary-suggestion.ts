@@ -9,6 +9,16 @@ import {
 	lisbonFixture,
 } from "./itinerary-suggestion.fixtures.js";
 
+export function validateSuggestion(data: unknown) {
+	const result = ItinerarySuggestionSchema.safeParse(data);
+
+	if (!result.success) {
+		throw new Error("Invalid itinerary suggestion");
+	}
+
+	return result.data;
+}
+
 export function getMockItinerarySuggestion(destination: string) {
 	const normalizedDestination = destination.trim().toLowerCase();
 
@@ -23,15 +33,12 @@ export function getMockItinerarySuggestion(destination: string) {
 	if (!fixture) {
 		throw new UnsupportedDestinationError();
 	}
-	const result = ItinerarySuggestionSchema.safeParse(fixture);
 
-	if (!result.success) {
-		throw new Error("Validation error");
-	}
+	const validatedSuggestion = validateSuggestion(fixture);
 
 	return {
 		source: "mock",
-		suggestion: result.data,
+		suggestion: validatedSuggestion,
 	};
 }
 
