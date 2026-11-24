@@ -25,3 +25,33 @@ test("validates a single-day itinerary with one activity", () => {
 
 	assert.equal(result.success, true);
 });
+
+test("rejects an itinerary with invalid activity position", () => {
+	const invalidFixture = structuredClone(romeFixture);
+
+	invalidFixture.days[0].activities[0].position = 0;
+	const result = ItinerarySuggestionSchema.safeParse(invalidFixture);
+
+	assert.equal(result.success, false);
+});
+
+test("rejects an itinerary with missing days", () => {
+	const invalidFixture = { title: "Rome" };
+
+	const result = ItinerarySuggestionSchema.safeParse(invalidFixture);
+
+	assert.equal(result.success, false);
+});
+
+test("rejects an itinerary when days is not an array", () => {
+	const invalidFixture = { title: "Rome", days: "Three days" };
+
+	const result = ItinerarySuggestionSchema.safeParse(invalidFixture);
+
+	assert.equal(result.success, false);
+
+	if (!result.success) {
+		assert.equal(result.error.issues[0].path[0], "days");
+		assert.equal(result.error.issues[0].code, "invalid_type");
+	}
+});
