@@ -1,7 +1,7 @@
 # TripSync Itinerary Service — Architecture v1
 
 **Status:** Design exercise, not an implemented-system guarantee.  
-**Scope:** One itinerary per trip; Next.js frontend, Fastify API, PostgreSQL database.
+**Scope:** One itinerary per trip; Next.js frontend, Fastify API, PostgreSQL database, local mock AI suggestion generator, and planned external AI integration.
 
 ## Users and assumptions
 
@@ -30,30 +30,150 @@
 
 ## API sketch
 
-| Action               | Proposed endpoint                                      | Body / response                                                                                                                |
-| -------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| Read itinerary       | `GET /api/itineraries/:itineraryId`                    | `200` with trip name and `days: [{ date, activities: [{ id, title, position, time?, location?, notes? }] }]`                   |
-| Create activity      | `POST /api/activities`                                 | `{ trip_id, title, date, time?, location?, notes? }`; server may assign next `position`                                        |
-| Edit activity        | `PATCH /api/activities/:activityId`                    | Only changed fields, e.g. `{ "title": "Tokyo Tower at sunset" }`                                                               |
-| Delete activity      | `DELETE /api/activities/:activityId`                   | Delete the selected activity                                                                                                   |
-| Reorder within a day | `PATCH /api/itineraries/:itineraryId/activities/order` | `{ "date": "2027-10-10", "activities": [{ "id": 3, "position": 1 }, { "id": 1, "position": 2 }, { "id": 2, "position": 3 }] }` |
+| Action                  | Proposed endpoint                                      | Body / response                                                                                                                |
+| ----------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| Read trip and itinerary | `GET /trips/:id` (implemented)                         | `200` with `{ id, title, days: [{ dayNumber, activities: [{ id, title, position }] }] }`                                       |
+| Create activity         | `POST /api/activities`                                 | `{ trip_id, title, date, time?, location?, notes? }`; server may assign next `position`                                        |
+| Edit activity           | `PATCH /api/activities/:activityId`                    | Only changed fields, e.g. `{ "title": "Tokyo Tower at sunset" }`                                                               |
+| Delete activity         | `DELETE /api/activities/:activityId`                   | Delete the selected activity                                                                                                   |
+| Reorder within a day    | `PATCH /api/itineraries/:itineraryId/activities/order` | `{ "date": "2027-10-10", "activities": [{ "id": 3, "position": 1 }, { "id": 1, "position": 2 }, { "id": 2, "position": 3 }] }` |
 
-**API-ID decision pending implementation:** Earlier API exercises use `:itineraryId`, but the existing PostgreSQL exercise links `itinerary_items.trip_id` to `trips.id`. With one itinerary per trip, prefer resolving the API to a **trip ID** (for example, `GET /api/trips/:tripId/itinerary`) before coding, and revise the previous API specification consistently. Do not assume an `itineraries` table exists.
+**API-ID decision pending implementation:** The implemented read endpoint uses the trip ID (`GET /trips/:id`). Activities are linked to trips through `itinerary_items.trip_id`.
+
+Future activity endpoints should use a consistent trip-based identifier convention.
 
 **Errors and security:** Missing resource → `404` with `{ "code": "ITINERARY_NOT_FOUND", "message": "Itinerary not found" }`. Invalid or missing authentication on private endpoints → `401`; an authenticated user attempting a forbidden edit → `403` (or deliberately `404` to avoid exposing private resource existence). Sharing links should use unguessable tokens and only permit reads. Validate that every activity belongs to the target trip/day.
+
+**API convention:** Standardize the `/api` route prefix
+before implementation.
+
+**Implemented in Fastify:**
+
+| Method | Endpoint                    | Description                     |
+| ------ | --------------------------- | ------------------------------- |
+| GET    | `/health`                   | Health check                    |
+| GET    | `/trips`                    | List trips                      |
+| GET    | `/trips/:id`                | Trip with nested itinerary days |
+| POST   | `/trips`                    | Create trip                     |
+| PATCH  | `/trips/:id`                | Update trip title               |
+| POST   | `/ai/itinerary-suggestions` | Mock AI generation              |
+
+**Planned functionality:**
+
+- Create, update, delete, and reorder activities.
+- Read-only sharing and authorization.
+- Auto-save of itinerary changes.
+- Integration with an external AI provider.
+- Runtime validation of real AI-generated output.
+
+The implemented API currently uses `/trips` rather
+than `/api/trips`.
+
+The planned activity endpoints should follow a
+consistent naming convention before implementation.
+
+### Trip Details and AI Suggestion Requests
+
+The following endpoints are implemented in Fastify. The AI suggestion endpoint currently uses a local mock generator rather than an external AI provider.
+
+#### GET /trips/:id
+
+**Request flow:**
+
+1. Next.js sends the trip ID to Fastify.
+2. Fastify validates the trip ID format. Authentication and authorization checks are planned.
+3. Fastify queries PostgreSQL for the trip.
+4. PostgreSQL returns the trip data.
+5. Fastify responds with JSON.
+
+**Successful response (200):**
+
+```json
+{
+	"id": "550e8400-e29b-41d4-a716-446655440000",
+	"title": "Japan 2027",
+	"days": [
+		{
+			"dayNumber": 1,
+			"activities": [
+				{
+					"id": "a2470489-8f18-44fa-997c-d2b2147d9768",
+					"title": "Visit Museum",
+					"position": 1
+				}
+			]
+		}
+	]
+}
+```
+
+**Error responses:**
+
+- 400: Invalid UUID format.
+- 404: Trip does not exist.
+- 500: Unexpected server/database failure.
+
+404 response:
+
+```json
+{
+	"message": "Trip not found"
+}
+```
+
+#### POST /ai/itinerary-suggestions
+
+**Request body:**
+
+```json
+{
+	"destination": "Rome"
+}
+```
+
+**Current implementation (mock):**
+
+1. Next.js sends the destination to Fastify.
+2. Fastify validates the request body using JSON Schema.
+3. Fastify calls `getMockItinerarySuggestion()`.
+4. The mock generator returns structured suggestions.
+5. Fastify responds with status 200 and JSON.
+
+**Current error cases:**
+
+- 400: Missing or invalid destination.
+- 400: Unsupported destination.
+- 500: Unexpected internal server error.
+
+**Planned external AI integration:**
+
+1. Fastify validates the request body.
+2. Fastify calls the external AI provider.
+3. The provider returns generated suggestions.
+4. Fastify validates the output using Zod.
+5. Fastify returns validated JSON.
+
+**Additional planned failure cases:**
+
+- 502: Invalid upstream AI response.
+- 503: AI provider unavailable.
+- 504: AI provider timeout.
+
+AI suggestions are not automatically persisted
+to PostgreSQL.
 
 ## High-level design and read/write data flow
 
 ```mermaid
 flowchart LR
-    U[Owner or link viewer] --> FE[Next.js / React\nTanStack Query cache]
-    FE -->|GET / PATCH HTTP| API[Fastify API\nauth, validation, access rules]
-    API -->|SQL read / transaction| DB[(PostgreSQL\ntrips + itinerary_items)]
-    DB -->|rows / commit outcome| API
-    API -->|nested-by-day JSON / errors| FE
+    A["Next.js / TanStack Query"] <-->|HTTP| B["Fastify API"]
+    B <-->|SQL| C[("PostgreSQL")]
+    B --> D["Mock AI Generator"]
+    B -.->|"Future HTTPS integration"| E["External AI Provider"]
 ```
 
-- **Read:** TanStack Query requests itinerary → Fastify checks visibility → PostgreSQL returns trip/items → Fastify groups activities by day and sorts by `position` → browser renders and caches response.
+- **Current read flow:** Fastify validates the trip ID, queries PostgreSQL, and returns activities grouped by day and sorted by position.
+- **Planned security:** Fastify will authenticate users and enforce ownership or sharing permissions before returning private trip data.
 - **Write/reorder:** Owner sends edits → Fastify verifies ownership, validates dates/positions and item membership → PostgreSQL applies all related position updates in **one transaction** → Fastify acknowledges success → frontend invalidates/updates its cached itinerary. If one update fails, **roll back all** reorder changes.
 - **Data design to verify:** Existing `trips` and `itinerary_items` with foreign key `trip_id`; confirm activity date and position fields, and ownership/sharing fields in the real schema before implementation. An index starting with `trip_id` can help itinerary lookups; assess it using query plans.
 
@@ -71,9 +191,10 @@ flowchart LR
 
 1. **Nested-by-day response vs. flat activity array (daily itinerary UI).** Nested JSON matches the day-by-day React view, so the frontend does less grouping. The cost is deeper object traversal and more complex immutable updates; a flat array is simpler for generic activity manipulation but requires grouping by date for the daily view. Decision: Keep the nested-by-day GET response for v1.
 2. **Nested vs. flat response (trip-wide search).** With a flat array already loaded in the browser, filtering all activities is straightforward. With nested JSON, the client must traverse each day or flatten the activities first. Tradeoff nuance: This concerns client-side searching over a fetched response; backend search can query flat relational activity rows directly, regardless of how the GET response is shaped. Decision: Keep nested GET for the current day-based UI and introduce a dedicated search endpoint only if product needs warrant it.
-   **Ordering justification:** Give each activity a stable id and an explicit position scoped to its day. Array indexes describe the current array layout, but are not persistent database ordering keys: a deletion, insertion, or new response can shift indexes. Sort by position when reading; validate a complete reorder payload and save all affected positions atomically. If v1 requires consecutive positions, renumber after deletion within a transaction.
 
-\*\*Two API failure scenarios
+**Ordering justification:** Give each activity a stable id and an explicit position scoped to its day. Array indexes describe the current array layout, but are not persistent database ordering keys: a deletion, insertion, or new response can shift indexes. Sort by position when reading; validate a complete reorder payload and save all affected positions atomically. If v1 requires consecutive positions, renumber after deletion within a transaction.
+
+### Two API failure scenarios
 
 1. **Missing itinerary:** GET /api/itineraries/:itineraryId for a well-formed nonexistent ID returns 404 Not Found with { "code": "ITINERARY_NOT_FOUND", "message": "Itinerary not found" }. Use a resource-specific error code so the UI can distinguish missing itineraries from other errors.
 2. **Database failure halfway through reorder:** PATCH /api/itineraries/:itineraryId/activities/order applies the changes in a database transaction. If an update fails unexpectedly, ROLLBACK all affected position changes and return 500 Internal Server Error, for example { "code": "REORDER_FAILED", "message": "Could not save activity order" }. The frontend should show an error and revert or refetch any optimistic ordering. Do not leave a partially saved order.
@@ -89,6 +210,10 @@ flowchart LR
 - Actual peak traffic may be substantially higher.
 
 ### Request/Data Flow
+
+**Target-state request flow:** This diagram includes
+planned authorization checks that are not yet implemented
+in Fastify.
 
 ```mermaid
 flowchart TD
@@ -187,6 +312,49 @@ justify it.
 **Current decision:** Keep the simple architecture for v1.
 Optimize and scale based on measured performance.
 
-```
+## AI Integration and Caching Review — November 25, 2026
 
-```
+### Caching Decision
+
+**Proposed caching strategy:**
+
+Configure TanStack Query with an initial 30-second `staleTime` for trip details. Invalidate relevant queries after successful mutations.
+
+The configuration should be verified against the actual Next.js implementation.
+
+Benefits:
+
+- Fewer repeated requests from the same client.
+- Faster rendering of recently fetched data.
+
+Risks:
+
+- Users may temporarily see stale data.
+- Separate clients maintain independent caches.
+- Initial requests from many users still reach Fastify.
+
+Mitigation:
+Invalidate relevant queries after successful edits.
+Consider additional freshness mechanisms if shared
+itineraries require more immediate updates.
+
+### Architecture Weaknesses
+
+1. **Stale client cache:** Data might be outdated after
+   changes from another session. Explore refetching
+   and cache invalidation strategies.
+
+2. **Single Fastify instance:** Increased traffic or
+   server failure can affect availability and latency.
+   Measure server performance before introducing
+   horizontal scaling.
+
+### New AI Dependency
+
+The external AI provider introduces additional latency
+and potential failures.
+
+Fastify should validate inputs and outputs, enforce
+request timeouts, and handle upstream failures.
+
+Keep AI generation separate from database persistence.
