@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS idx_itinerary_trip_order ON itinerary_items (trip_id, day_number, position, id);
